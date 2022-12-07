@@ -1,16 +1,40 @@
 {
   "name": "blog",
   "version": "1.0.0",
-  "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon app.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "joi": "^17.7.0",
+    "jsonwebtoken": "^8.5.1",
     "mongodb": "^4.12.1",
-    "mongoose": "^6.7.3"
-  }
+    "morgan": "^1.10.0",
+    "mysql2": "^2.3.3",
+    "nodemon": "^2.0.20",
+    "sequelize": "^6.26.0",
+    "swagger-ui": "^4.15.5",
+    "swagger-ui-dist": "^4.15.5"
+  },
+  "devDependencies": {
+    "sequelize-cli": "^6.5.2",
+    "swagger-jsdoc": "^6.2.5",
+    "swagger-ui-express": "^4.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alan-rla/dev_blog.git"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/alan-rla/dev_blog/issues"
+  },
+  "homepage": "https://github.com/alan-rla/dev_blog#readme",
+  "description": ""
 }

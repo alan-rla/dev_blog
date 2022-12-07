@@ -1,159 +1,231 @@
+const { Op, DataTypes, Sequelize } = require("sequelize");
+const { Users, Posts, Comments, Likes } = require("../models");
+const authMiddleware = require("../middlewares/auth-middleware.js")
 const express = require('express');
-const comments = require('../schemas/comments.js');
 const router = express.Router();
 
-// Schema 호출
-const Posts = require("../schemas/posts.js");
-const Comments = require("../schemas/comments.js");
-
 // 게시글 POST
-router.post("/posts", async (req, res) => {
+router.post("/", authMiddleware, async (req, res, next) => {
     try {
-        const { user, password, title, content } = req.body;
-
+        const { userId } = res.locals.user;
+        const { title, content } = req.body;
         // 제목/내용 있는지 확인
-        if (user.length === 0 ||
-            password.length === 0 ||
-            title.length === 0 ||
-            content.length === 0) {
-            return res.status(400).json({ message: "데이터 형식이 올바르지 않습니다." });
-        }        
-        
-        // 게시글 작성 시간
-        Date.prototype.YYYYMMDDHHMMSS = function () {
-            let yyyy = this.getFullYear().toString();
-            let MM = pad(this.getMonth() + 1,2);
-            let dd = pad(this.getDate(), 2);
-            let hh = pad(this.getHours() + 9, 2); // 서버 위치가 미국이라 +9 더해줌
-            let mm = pad(this.getMinutes(), 2)
-            let ss = pad(this.getSeconds(), 2)
-            let ms = pad(this.getMilliseconds(), 3)
-        
-            return `${yyyy}-${MM}-${dd}T${hh}:${mm}-${ss}.${ms}Z`;
-        };
+        if (title.length === 0 || content.length === 0) {
+            throw {message: "POSTS_TITLE_CONTENT_NULL"}
+        }                
 
-        function pad(number, length) {
-            let str = '' + number;
-            while (str.length < length) {
-            str = '0' + str;
-            }
-            return str;
+        await Posts.create({ userId, title, content });
+
+        return res.json({ message : "게시글을 작성했습니다." });
+    } catch (err) {
+        if (err.message.includes("POSTS_")) {
+            next(err);
+        } else {
+            err.message = "POSTS_POST_UNKNOWN";
+            next(err);
         }
-
-        let nowDate = new Date();
-        let createdAt = nowDate.YYYYMMDDHHMMSS();
-
-        await Posts.create({ user, password, title, content, createdAt });
-
-        res.json({ "message": "게시글을 생성하였습니다." });
-    } catch {
-        return res.status(400).json({ message: "데이터 형식이 올바르지 않습니다." });
     }
 });
 
 // 게시글 GET
-router.get("/posts", async (req, res) => {
-    const posts = await Posts.find({});
-    const results = posts.map((post) => {
-        return {
-            "postId": post._id,
-            "user": post.user,
-            "title": post.title,
-            "createdAt": post.createdAt
-        }
-    });
-    res.status(200).json({"data": results});
+router.get("/", async (req, res, next) => {
+    try {
+        const posts = await Posts.findAll({                                    
+            attributes: [
+                'postId',
+                'userId', 
+                [Sequelize.col("User.nickname"), 'nickname'], 
+                'title', 
+                'createdAt', 
+                'updatedAt',
+                [Sequelize.fn('COUNT', Sequelize.col("Likes.postId")), 'likes'], 
+            ],
+            include: [
+                {model: Users, attributes: []},
+                {model: Likes, as:'Likes', attributes: []},
+            ],
+            group: 'postId',
+            order: [['postId', 'DESC']],
+        })
+
+        return res.status(200).json({"data": posts});
+    } catch (err) {
+        err.message = "POSTS_GET_UNKNOWN";
+        next(err);
+    }
 });
 
 // 게시글 상세 조회
-router.get("/posts/:postId", async (req, res) => {
-    const { postId } = req.params;    
-    try {
-        const result = await Posts.findOne({ "_id" : postId});
-        if (!result) {
-            return res.status(400).json({ message: "데이터 형식이 올바르지 않습니다." });
-        }
+router.get("/:postId", async (req, res, next) => {      
+    const { postId } = req.params;
+    if (postId === 'like') {
+        next();
+    } else {
+        try {
+            const post = await Posts.findOne({
+                where: {'postId': postId},
+                attributes: [
+                    'postId',
+                    'userId', 
+                    [Sequelize.col("User.nickname"), 'nickname'], 
+                    'title',
+                    'content',
+                    'createdAt', 
+                    'updatedAt', 
+                    [Sequelize.fn('COUNT', Sequelize.col("Likes.postId")), 'likes'], 
+                ],
+                include: [
+                    {model: Users, attributes: []},
+                    {model: Likes, as:'Likes', attributes: []},
+                ],
+            });
+            
+            if (post.postId === null) {
+                throw {message: "POSTS_GET_UNKNOWN"};
+            }
 
-        res.status(200).json({"data": {
-            "postId": result._id,
-            "user": result.user,
-            "title": result.title,
-            "content": result.content,
-            "createdAt": result.createdAt
-        }});
-    } catch {
-        return res.status(400).json({ message: "데이터 형식이 올바르지 않습니다." });
+            return res.status(200).json({"data": post});
+        } catch (err) {
+            err.message = "POSTS_GET_UNKNOWN";
+            next(err);
+        }
+    }
+});
+
+// 좋아요한 게시글들 조회
+router.get("/like", authMiddleware, async (req, res, next) => {      
+    try {
+        const { userId } = res.locals.user;
+        const likes = await Likes.findAll({
+            where: {'userId':userId},
+            attributes: [
+                'postId',
+                [Sequelize.col("Post.userId"), 'userId'],
+                [Sequelize.col("Post.title"), 'title'],
+                [Sequelize.col("Post.content"), 'content'],
+                [Sequelize.col("Post.createdAt"), 'createdAt'],
+                [Sequelize.col("Post.updatedAt"), 'updatedAt'],
+                [Sequelize.fn('COUNT', Sequelize.col("Likes.postId")), 'likes'], 
+            ],
+            order: [['likes', 'DESC']],
+            group: 'postId',
+            include: [{
+                model: Posts, 
+                include: {model: Likes, as: "Likes", attributes: []}, 
+                attributes: []}
+            ],
+        });
+        return res.status(200).json({"data": likes});
+    } catch (err) {
+        err.message = "POSTS_GET_UNKNOWN";
+        next(err);
     }
 });
 
 // 게시글 수정
-router.put("/posts/:postId", async (req, res) => {
-    // 게시글 조회
-    const { postId } = req.params;          
+router.put("/:postId", authMiddleware, async (req, res, next) => {       
     try {
-        const post = await Posts.findOne({ "_id" : postId});
-
+        const { userId } = res.locals.user;
+        const { postId } = req.params;  
+        const { title, content } = req.body;
+        const post = await Posts.findByPk(postId);
+        // 게시글 존재하는지 확인
         if (!post) {
-            return res.status(400).json({ message: '게시글 조회에 실패하였습니다.' });
+            throw {message: "POSTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(404).json({ message: '게시글 조회에 실패하였습니다.' });
-    }
-    
-    // 게시글 수정
-    try {
-        const { password, title, content } = req.body;
-        const post = await Posts.findOne({ "_id" : postId});
-
-        if (password !== post.password ||
-            title.length === 0 ||
-            content.length === 0) {
-            return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        // 로그인한 계정이 게시글 작성자인지 확인
+        if (post.userId !== userId) {
+            throw {message: "POSTS_USERID_UNMATCH"};
         }
-    
-        await Posts.updateOne({ "_id" : postId},{$set: {
-            title : title,
-            content : content
-        }});
-    
-        res.status(200).json({ "message": "게시글을 수정하였습니다." });
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
-    }
 
+        if (title.length === 0 || content.length === 0) {
+            throw {message: "POSTS_TITLE_CONTENT_NULL"}
+        }
+        post.title = title;
+        post.content = content;
+        post.updatedAt = DataTypes.NOW;
+        await post.save();
+
+        return res.status(200).json({ message: "게시글을 수정했습니다." });
+    } catch (err) {
+        if (err.message.includes("POSTS_")) {
+            next(err);
+        } else {
+            err.message = "POSTS_PUT_UNKNOWN";
+            next(err);
+        }
+    }
 });
 
 // 게시글 삭제
-router.delete("/posts/:postId", async (req, res) => {
-    const { postId } = req.params;
-
-    // 게시글 검색
+router.delete("/:postId", authMiddleware, async (req, res, next) => {
     try {
-        const post = await Posts.findOne({ "_id" : postId});
-
+        const { userId } = res.locals.user;
+        const { postId } = req.params;        
+        const post = await Posts.findByPk(postId);
+        // 게시글 존재하는지 확인
         if (!post) {
-            return res.status(400).json({ message: '게시글 조회에 실패하였습니다.' });
+            throw {message: "POSTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(404).json({ message: '게시글 조회에 실패하였습니다.' });
+        // 로그인한 계정이 게시글 작성자인지 확인
+        if (post.userId !== userId) {
+            throw {message: "POSTS_USERID_UNMATCH"};
+        }
+        await post.destroy();
+        await Comments.destroy({ where: {"postId": postId}});
+        return res.status(200).json({ message: '게시글을 삭제했습니다.' });
+    } catch (err) {
+        if (err.message.includes("POSTS_")) {
+            next(err);
+        } else {
+            err.message = "POSTS_DELETE_UNKNOWN";
+            next(err);
+        }
     }
+});
 
-    // 게시글 삭제
+// 게시글 좋아요
+router.put("/:postId/like", authMiddleware, async (req, res, next) => {
     try {
-        const { password } = req.body;
-        const post = await Posts.findOne({ "_id" : postId});
-
-        if (password !== post.password) {
-            return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        const { userId } = res.locals.user;
+        const { postId } = req.params;
+        // 게시글 있는지 확인
+        const post = await Posts.findByPk(postId);
+        if (!post) {
+            throw {message: "POSTS_GET_UNKNOWN"};
+        } // 게시글 작성자인지 확인
+        else if (post.userId === userId) {
+            throw {message: "POSTS_SAME_ID"};
         }
-
-        await Posts.deleteOne({ "_id": postId});
-        // 게시글에 종속된 댓글도 삭제
-        await Comments.deleteMany({ "postId": postId});
-
-        res.json({ "message": "게시글을 삭제하였습니다." });    
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        // 이미 좋아요 했는지 확인
+        const postLike = await Likes.findOne({
+            where: {
+                [Op.and]: [
+                    {'postId': postId},
+                    {'userId': userId}
+                ]
+            }
+        });
+        if (!postLike) {
+            await Likes.create({ postId, userId });
+            // const likeCount = await Likes.findAll({'postId':postId})
+            // post.likes = likeCount.length;
+            // await post.save();
+            return res.json({ message : "게시글의 좋아요를 등록했습니다." });
+        } else {
+            await postLike.destroy();
+            // const likeCount = await Likes.findAll({'postId':postId})
+            // post.likes = likeCount.length;
+            // await post.save();
+            return res.json({ message : "게시글의 좋아요를 취소했습니다." });
+        }
+    } catch (err) {
+        if (err.message.includes("POSTS_")) {
+            next(err);
+        } else {
+            err.message = "POSTS_LIKE_UNKNOWN";
+            next(err);
+        }
     }
 });
 

@@ -1,21 +1,21 @@
 const express = require('express');
+const routes = require("./routes");
+const errorHandler = require("./middlewares/error-handler.js")
 const app = express();
-const port = 3000;
+const cookieParser = require("cookie-parser");
+require("dotenv").config()
 
-const postsRouter = require("./routes/posts.js")
-const commentsRouter = require("./routes/comments.js")
-const connect = require("./schemas");
-connect();
+const morgan = require('morgan')
+app.use(morgan('dev'));
 
+app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use(cookieParser());
 
 // localhost:3000/api
-app.use("/api", [postsRouter, commentsRouter]);
+app.use("/api", routes);
+app.use("/", errorHandler);
 
-app.get('/', (req, res) => {
-    res.send('Hello World!');
-});
-
-app.listen(port, () => {
-console.log(port, '포트로 서버가 열렸어요!');
+app.listen(process.env.PORT, () => {
+console.log(process.env.PORT, '포트로 서버가 열렸어요!');
 });

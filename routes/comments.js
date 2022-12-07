@@ -1,162 +1,120 @@
+const { DataTypes, Sequelize } = require("sequelize");
+const { Users, Posts, Comments } = require("../models");
+const authMiddleware = require("../middlewares/auth-middleware.js")
 const express = require('express');
 const router = express.Router();
 
-// Schema 호출
-const Posts = require("../schemas/posts.js");
-const Comments = require("../schemas/comments.js");
-
-router.post("/comments/:postId", async (req, res) => {
-    const { postId } = req.params;
+// 댓글 생성
+router.post("/:postId", authMiddleware, async (req, res, next) => {    
     try {        
-        const post = await Posts.findOne({ "_id" : postId});
-
+        const { userId, nickname } = res.locals.user;
+        const { postId } = req.params;
+        const { comment } = req.body;
+        const post = await Posts.findByPk(postId);
+        // 게시글 존재하는지 확인
         if (!post) {
-            return res.status(400).json({ message: "존재하지 않는 게시글입니다." });
+            throw {message: "POSTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(400).json({ message: "존재하지 않는 게시글입니다." });
-    }
-
-    try {
-        const { user, password, content } = req.body;
-
-        if (content.length === 0) {
-            return res.status(400).json({ message: '댓글 내용을 입력해주세요.' });
+        // 댓글 내용 있는지 확인        
+        if (comment.length === 0) {
+            throw {message: "COMMENTS_COMMENT_NULL"}
         }
-
-        if (user.length === 0 ||
-            password.length === 0) {
-            return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        await Comments.create({ postId, userId, nickname, comment })
+        return res.json({ message : "댓글을 생성했습니다." });
+    } catch (err) {
+        if (err.message.includes("POSTS_") || err.message.includes("COMMENTS_")) {
+            next(err);
+        } else {
+            err.message = "COMMENTS_POST_UNKNOWN";
+            next(err);
         }
-
-        // 게시글 작성 시간
-        Date.prototype.YYYYMMDDHHMMSS = function () {
-            let yyyy = this.getFullYear().toString();
-            let MM = pad(this.getMonth() + 1,2);
-            let dd = pad(this.getDate(), 2);
-            let hh = pad(this.getHours() + 9, 2); // 서버 위치가 미국이라 +9 더해줌
-            let mm = pad(this.getMinutes(), 2)
-            let ss = pad(this.getSeconds(), 2)
-            let ms = pad(this.getMilliseconds(), 3)
-            
-            return `${yyyy}-${MM}-${dd}T${hh}:${mm}-${ss}.${ms}Z`;
-        };
-
-        function pad(number, length) {
-            let str = '' + number;
-            while (str.length < length) {
-                str = '0' + str;
-            }
-            return str;
-        }
-
-        let nowDate = new Date();
-        let createdAt = nowDate.YYYYMMDDHHMMSS();
-
-        await Comments.create({ user, password, content, createdAt, postId });
-
-        res.json({ "message": "댓글을 생성하였습니다." });
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
     }
 });
 
-// 댓글 GET
-router.get("/comments/:postId", async (req, res) => {
-    const { postId } = req.params;
-
+// 댓글 조회
+router.get("/:postId", async (req, res, next) => {
     try {        
-        const post = await Posts.findOne({ "_id" : postId});
-
+        const { postId } = req.params;
+        const post = await Posts.findByPk(postId);
+        // 게시글 존재하는지 확인
         if (!post) {
-            return res.status(400).json({ message: "존재하지 않는 게시글입니다." });
+            throw {message: "POSTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(400).json({ message: "존재하지 않는 게시글입니다." });
-    }
 
-    try {
-        const comments = await Comments.find({ postId });
-
-        const results = comments.map((comment) => {
-            return {
-                "commentId": comment._id,
-                "user": comment.user,
-                "content": comment.content,
-                "createdAt": comment.createdAt
-            }
+        const comments = await Comments.findAll({
+            where: {'postId':postId},
+            order: [[ 'commentId', 'DESC']],
+            attributes: ['commentId', 'userId', [Sequelize.col("User.nickname"), 'nickname'], 'comment', 'createdAt', 'updatedAt'],
+            include: [{model: Users, attributes: []}],
         });
-        res.status(200).json({"data": results});
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+
+        return res.status(200).json({"data": comments});
+    } catch (err) {
+        if (err.message.includes("POSTS_") || err.message.includes("COMMENTS_")) {
+            next(err);
+        } else {
+            err.message = "COMMENTS_GET_UNKNOWN";
+            next(err);
+        }
     }
 });
 
 // 댓글 수정
-router.put("/comments/:commentId", async (req, res) => {
-    const { commentId } = req.params;    
-        
+router.put("/:commentId", authMiddleware, async (req, res, next) => {              
     try {
-        const comment = await Comments.findOne({ "_id" : commentId});
-
-        if (!comment) {
-            return res.status(400).json({ message: '댓글 조회에 실패하였습니다.' });
+        const { userId } = res.locals.user;
+        const { commentId } = req.params;
+        const { comment } = req.body;        
+        const commentOrigin = await Comments.findByPk(commentId);
+        // 댓글 존재하는지 확인
+        if (!commentOrigin) {
+            throw {message: "COMMENTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(404).json({ message: '댓글 조회에 실패하였습니다.' });
-    }
-
-    try {
-        const { password, content } = req.body;
-        const comment = await Comments.findOne({ "_id" : commentId});
-
-        if (content.length === 0) {
-            return res.status(400).json({ message: '댓글 내용을 입력해주세요.' });
+        // 로그인한 계정이 댓글 작성자인지 확인
+        if (commentOrigin.userId !== userId) {
+            throw {message: "COMMENTS_ID_UNMATCH"};
         }
-
-        if (password !== comment.password) {
-            return res.status(400).json({ message: '비밀번호가 틀렸습니다.' });
+        // 댓글 내용 있는지 확인
+        if (comment.length === 0) {
+           throw {message: "COMMENTS_COMMENT_NULL"}
         }
-    
-        await Comments.updateOne({ "_id" : commentId},{$set: {
-            content : content
-        }});
-    
-        res.status(200).json({ "message": "댓글을 수정하였습니다." });
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        commentOrigin.comment = comment;
+        commentOrigin.updatedAt = DataTypes.NOW;
+        await commentOrigin.save();
+        return res.status(200).json({ message: "댓글을 수정했습니다." });
+    } catch (err) {
+        if (err.message.includes("COMMENTS_")) {
+            next(err);
+        } else {
+            err.message = "COMMENTS_PUT_UNKNOWN";
+            next(err);
+        }
     }
 });
 
 // 댓글 삭제
-router.delete("/comments/:commentId", async (req, res) => {
-    const { commentId } = req.params;
-
-    // 댓글 검색
+router.delete("/:commentId", authMiddleware, async (req, res, next) => {
     try {
-        const comment = await Comments.findOne({ "_id" : commentId });
-
+        const { userId } = res.locals.user;
+        const { commentId } = req.params;
+        const comment = await Comments.findByPk(commentId);
+        // 댓글 존재하는지 확인
         if (!comment) {
-            return res.status(400).json({ message: '댓글 조회에 실패하였습니다.' });
+            throw {message: "COMMENTS_GET_UNKNOWN"};
         }
-    } catch {
-        return res.status(404).json({ message: '댓글 조회에 실패하였습니다.' });
-    }
-
-    // 댓글 삭제
-    try {
-        const { password } = req.body;
-        const comment = await Comments.findOne({ "_id" : commentId});
-
-        if (password !== comment.password) {
-            return res.status(400).json({ message: '비밀번호가 틀렸습니다.' });
+        // 로그인한 계정이 댓글 작성자인지 확인
+        if (comment.userId !== userId) {
+            throw {message: "COMMENTS_ID_UNMATCH"};
         }
-
-        await Comments.deleteOne({ "_id": commentId});
-
-        res.json({ "message": "댓글을 삭제하였습니다." });    
-    } catch {
-        return res.status(400).json({ message: '데이터 형식이 올바르지 않습니다.' });
+        await comment.destroy();
+        return res.status(200).json({ message: '댓글을 삭제했습니다.' });
+    } catch (err) {
+        if (err.message.includes("COMMENTS_")) {
+            next(err);
+        } else {
+            err.message = "COMMENTS_DELETE_UNKNOWN";
+            next(err);
+        }
     }
 });
 
