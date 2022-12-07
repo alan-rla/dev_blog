@@ -1,1 +1,0 @@
-DROP DATABASE dev_blog
